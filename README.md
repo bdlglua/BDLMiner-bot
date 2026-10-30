@@ -21,6 +21,7 @@ no gateway connection. Every push to `main` is tested and deployed by GitHub Act
 | `/btc` | Everyone | Price, height, difficulty, network hashrate, next adjustment, fees (mempool.space) |
 | `/pool` | Everyone | What a solo pool sees of an address: hashrate, best difficulty, shares, workers |
 | `/odds` | Everyone | Chance of a block per day and year for a hashrate (`1M`, `350k`, `1.2 TH/s`) |
+| `/help` | Everyone | The commands the member can use, by category |
 | `/install` `/pools` `/faq` | Everyone | Ready answers, optionally mentioning a member |
 
 Moderation replies are only shown to the moderator; every action is logged in the

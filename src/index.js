@@ -4,11 +4,12 @@
 import { COMMAND, COMPONENT, DEFERRED, EPHEMERAL, followUp, json, MESSAGE, PING, PONG, verify } from "./discord.js";
 import { say } from "./util.js";
 import * as answers from "./commands/answers.js";
+import * as help from "./commands/help.js";
 import * as moderation from "./commands/moderation.js";
 import * as stats from "./commands/stats.js";
 import * as tickets from "./commands/tickets.js";
 
-const MODULES = [moderation, stats, answers, tickets];
+const MODULES = [help, answers, stats, tickets, moderation];
 
 export const commands = MODULES.flatMap((m) => m.definitions).map((c) => ({ type: 1, contexts: [0], ...c }));
 

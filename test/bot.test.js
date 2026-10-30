@@ -262,6 +262,28 @@ describe("answers", () => {
   });
 });
 
+describe("help", () => {
+  const names = (body) => body.data.embeds[0].fields.map((f) => f.name);
+  const text = (body) => body.data.embeds[0].fields.map((f) => f.value).join("\n");
+
+  it("lists every command by category for an administrator", async () => {
+    const { body } = await run(command("help", [], { perms: ADMIN }));
+    assert.equal(body.data.flags, 64);
+    assert.deepEqual(names(body), ["📚 Aide et réponses rapides", "₿ Bitcoin et pools", "🎫 Support", "🛡️ Modération"]);
+    for (const c of commands) assert.ok(text(body).includes(`\`/${c.name}`), c.name);
+    assert.match(text(body), /`\/warn membre raison` · Avertir un membre/);
+    assert.match(text(body), /`\/pool adresse \[pool\] \[hôte\] \[public\]`/);
+  });
+
+  it("hides the commands a member cannot use, in their language", async () => {
+    const { body } = await run(command("help", [], { perms: "0", locale: "en-US" }));
+    assert.deepEqual(names(body), ["📚 Help and quick answers", "₿ Bitcoin and pools", "🎫 Support"]);
+    assert.doesNotMatch(text(body), /\/warn|\/ticket-panel/);
+    assert.match(text(body), /`\/odds hashrate \[public\]` · Your chance/);
+    assert.match(text(body), /Open a ticket/);
+  });
+});
+
 describe("tickets", () => {
   function click(custom_id, { user = { id: "100", username: "alice" }, perms = "0", channel = "60" } = {}) {
     return { type: 3, token: "tok", guild_id: "1", channel_id: channel, locale: "fr", member: { user, permissions: perms }, data: { custom_id, component_type: 2 } };
