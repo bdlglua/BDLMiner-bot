@@ -71,12 +71,18 @@ export function parseFeed(xml) {
 
 // Release notes are written in docs/releases/<tag>.md, from which the GitHub
 // release is made; null when there is no such file (the 1.0.x releases).
-async function notesOf(tag) {
-  const res = await get(`${RAW}/${tag}/docs/releases/${tag}.md`);
+async function raw(path) {
+  const res = await get(`${RAW}/${path}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub ${res.status}`);
   return res.text();
 }
+
+const notesOf = (tag) => raw(`${tag}/docs/releases/${tag}.md`);
+
+// The French translation, docs/releases/<tag>.fr.md, is read from main: it may
+// be added after the release. null when there is none (yet).
+const frenchOf = (tag) => raw(`main/docs/releases/${tag}.fr.md`).catch(() => null);
 
 // The latest release; the last one seen is kept in KV in case GitHub fails.
 export async function latest(env) {
@@ -87,8 +93,13 @@ export async function latest(env) {
     const head = parseFeed(await res.text());
     if (!head) throw new Error("GitHub: no release found");
     const known = cached ? JSON.parse(cached) : null;
-    if (known?.tag_name === head.tag_name) return known;
-    const release = { ...head, body: (await notesOf(head.tag_name)) ?? "" };
+    if (known?.tag_name === head.tag_name) {
+      if (!known.body_fr && (known.body_fr = await frenchOf(known.tag_name)))
+        await env.BOT_KV.put("release:latest", JSON.stringify(known));
+      return known;
+    }
+    const [body, body_fr] = await Promise.all([notesOf(head.tag_name), frenchOf(head.tag_name)]);
+    const release = { ...head, body: body ?? "", body_fr };
     await env.BOT_KV.put("release:latest", JSON.stringify(release));
     return release;
   } catch (e) {
@@ -109,7 +120,7 @@ async function tagged(env, tag) {
     if (!page.ok) throw new Error(`GitHub ${page.status}`);
     body = "";
   }
-  const release = { tag_name: tag, name: `BDLMiner V1 ${tag.slice(1)}`, body, html_url, published_at: null };
+  const release = { tag_name: tag, name: `BDLMiner V1 ${tag.slice(1)}`, body, body_fr: await frenchOf(tag), html_url, published_at: null };
   await env.BOT_KV.put(key, JSON.stringify(release), { expirationTtl: DAY });
   return release;
 }
@@ -131,13 +142,19 @@ export function notes(body, tag, max = NOTES_MAX) {
   return `${text.slice(0, cut > max / 2 ? cut : max).trimEnd()}\n\n…`;
 }
 
+// In French when the notes have a translation (or there are no notes at all),
+// otherwise all in English: the card never mixes the two languages.
+export function french(release, l) {
+  return l === "fr" && (!!release.body_fr || !release.body);
+}
+
 export function embed(release, l = "fr") {
-  const fr = l === "fr";
+  const fr = french(release, l);
   return {
     title: `🚀 ${release.name || `BDLMiner V1 ${release.tag_name}`}`,
     url: release.html_url,
     color: ORANGE,
-    description: notes(release.body, release.tag_name) || undefined,
+    description: notes(fr && release.body_fr ? release.body_fr : release.body, release.tag_name) || undefined,
     fields: [{
       name: fr ? "Installer" : "Install",
       value: fr
@@ -178,7 +195,7 @@ export async function announce(env) {
   if (!channel) return "no releases channel";
   const role = await find(env, guild, "announce-role", (r) => /annonce|announce/i.test(r.name)).catch(() => "");
   await rest(env, "POST", `/channels/${channel}/messages`, {
-    content: `${role ? `<@&${role}> ` : ""}**${release.name || release.tag_name}** est sortie !`,
+    content: `${role ? `<@&${role}> ` : ""}**${release.name || release.tag_name}** ${french(release, "fr") ? "est sortie !" : "is out!"}`,
     embeds: [embed(release, "fr")],
     allowed_mentions: { roles: role ? [role] : [] },
   });

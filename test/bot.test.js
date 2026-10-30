@@ -352,20 +352,36 @@ describe("releases", () => {
     assert.equal(parseFeed("<feed></feed>"), null);
   });
 
-  it("/release shows the latest, fetching its notes once", async () => {
+  it("/release shows the latest in the member's language, fetching its notes once", async () => {
     let notesServed = 0;
     route("GET", /github\.com\/bdlglua\/BDLMinerV1\/releases\.atom$/, text(feed("v1.8.0")));
     route("GET", /raw\.githubusercontent\.com\/bdlglua\/BDLMinerV1\/v1\.8\.0\/docs\/releases\/v1\.8\.0\.md$/, () => (notesServed++, new Response(NOTES)));
+    route("GET", /raw\.githubusercontent\.com\/bdlglua\/BDLMinerV1\/main\/docs\/releases\/v1\.8\.0\.fr\.md$/, text("## Nouveautés\n\nTexte."));
     route("PATCH", /@original/, null);
     const first = await run(command("release"));
     assert.deepEqual(first.body, { type: 5, data: { flags: 0 } });
     assert.equal(first.follow.embeds[0].title, "🚀 BDLMiner V1 1.8.0 & more");
-    assert.match(first.follow.embeds[0].description, /^\*\*What's new\*\*/);
+    assert.equal(first.follow.embeds[0].description, "**Nouveautés**\n\nTexte.");
     assert.match(first.follow.embeds[0].fields[0].value, /installateur web/);
     calls = [];
     const second = await run(command("release", [], { locale: "en-US" }));
     assert.equal(notesServed, 1);
+    assert.match(second.follow.embeds[0].description, /^\*\*What's new\*\*/);
     assert.match(second.follow.embeds[0].fields[0].value, /web flasher/);
+  });
+
+  it("/release is all in English while the notes have no translation, then picks it up", async () => {
+    let translated = false;
+    route("GET", /releases\.atom$/, text(feed("v1.8.0")));
+    route("GET", /\/v1\.8\.0\/docs\/releases\/v1\.8\.0\.md$/, text(NOTES));
+    route("GET", /\/main\/docs\/releases\/v1\.8\.0\.fr\.md$/, () => (translated ? new Response("Texte.") : new Response("", { status: 404 })));
+    route("PATCH", /@original/, null);
+    const embed = (await run(command("release"))).follow.embeds[0];
+    assert.match(embed.description, /What's new/);
+    assert.equal(embed.fields[0].name, "Install");
+    translated = true;
+    calls = [];
+    assert.equal((await run(command("release"))).follow.embeds[0].description, "Texte.");
   });
 
   it("/release falls back on the last release seen when GitHub fails", async () => {
@@ -393,6 +409,7 @@ describe("releases", () => {
     env.DISCORD_GUILD_ID = "1";
     let tag = "v1.8.0";
     route("GET", /releases\.atom$/, () => new Response(feed(tag)));
+    route("GET", /\.fr\.md$/, () => new Response(tag === "v1.9.0" ? "Notes en français." : "", { status: tag === "v1.9.0" ? 200 : 404 }));
     route("GET", /raw\.githubusercontent\.com/, text(NOTES));
     route("GET", /\/guilds\/1\/channels$/, [{ id: "80", type: 0, name: "🔔-releases-github" }, { id: "81", type: 0, name: "💬-discussion" }]);
     route("GET", /\/guilds\/1\/roles$/, [{ id: "7", name: "🔔 Annonces" }]);
@@ -409,6 +426,8 @@ describe("releases", () => {
     assert.equal(post.content, "<@&7> **BDLMiner V1 1.9.0 & more** est sortie !");
     assert.deepEqual(post.allowed_mentions, { roles: ["7"] });
     assert.equal(post.embeds[0].title, "🚀 BDLMiner V1 1.9.0 & more");
+    assert.equal(post.embeds[0].description, "Notes en français.");
+    assert.equal(post.embeds[0].fields[0].name, "Installer");
     assert.equal(await announce(env), "up to date");
   });
 });

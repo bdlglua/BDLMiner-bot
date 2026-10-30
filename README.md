@@ -38,7 +38,9 @@ on the pool's host and its parent domain.
 Every 10 minutes the Worker checks [BDLMinerV1's releases](https://github.com/bdlglua/BDLMinerV1/releases)
 and posts a new one in the releases channel (the channel whose name contains
 *release*), mentioning the announcements role (*Annonces*). The first check after
-installing the bot only records the current release. `RELEASE_CHANNEL_ID` replaces
+installing the bot only records the current release. French speakers and the
+announcements get the French notes, `docs/releases/vX.Y.Z.fr.md` on BDLMinerV1's `main`,
+when there is one; otherwise the whole card is in English. `RELEASE_CHANNEL_ID` replaces
 the lookup by name.
 
 Music is not possible here: a Worker cannot join voice channels.
