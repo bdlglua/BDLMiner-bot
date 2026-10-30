@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import worker, { commands } from "../src/index.js";
 import { candidates, parseStats } from "../src/commands/stats.js";
-import { announce, notes } from "../src/commands/releases.js";
+import { announce, notes, parseFeed } from "../src/commands/releases.js";
 import { chance, duration, parseRate, si } from "../src/util.js";
 
 // --- Test harness: a signing key, a fake KV, a fake Discord/mempool ---
@@ -328,41 +328,62 @@ describe("tickets", () => {
 });
 
 describe("releases", () => {
-  const release = (tag, body = "## What's new\n\nA long\nwrapped line.\n- an item\n  continued\n- see [notes](../hardware/x.md)") => ({
-    tag_name: tag, name: `BDLMiner V1 ${tag.slice(1)}`, body, html_url: `https://github.com/bdlglua/BDLMinerV1/releases/tag/${tag}`,
-    published_at: "2026-10-30T13:40:00Z",
-  });
+  const NOTES = "## What's new\n\nA long\nwrapped line.\n- an item\n  continued\n- see [notes](../hardware/x.md)";
+  const feed = (tag) => `<?xml version="1.0"?><feed><title>Release notes</title><entry>
+    <id>tag:github.com,2008:Repository/1/${tag}</id><updated>2026-10-30T13:40:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/bdlglua/BDLMinerV1/releases/tag/${tag}"/>
+    <title>BDLMiner V1 ${tag.slice(1)} &amp; more</title><content type="html">&lt;p&gt;x&lt;/p&gt;</content></entry>
+    <entry><link href="https://github.com/bdlglua/BDLMinerV1/releases/tag/v0.0.1"/></entry></feed>`;
+  const text = (s) => () => new Response(s);
 
   it("turns GitHub release notes into Discord text", () => {
-    assert.equal(notes(release("v1.8.0").body, "v1.8.0"),
+    assert.equal(notes(NOTES, "v1.8.0"),
       "**What's new**\n\nA long wrapped line.\n- an item continued\n- see [notes](https://github.com/bdlglua/BDLMinerV1/blob/v1.8.0/docs/hardware/x.md)");
     assert.equal(notes("[a](https://x.org/y) [b](#c) <!-- hidden -->", "v1"), "[a](https://x.org/y) [b](#c)");
     const long = notes("para one\n\n" + "x".repeat(50) + "\n\npara three", "v1", 70);
     assert.equal(long, `para one\n\n${"x".repeat(50)}\n\n…`);
   });
 
-  it("/release shows the latest, reusing GitHub's answer while it is unchanged", async () => {
-    let served = 0;
-    route("GET", /api\.github\.com\/repos\/bdlglua\/BDLMinerV1\/releases\/latest$/, (url, init) => {
-      if (init.headers["If-None-Match"] === '"e1"') return new Response(null, { status: 304 });
-      served++;
-      return new Response(JSON.stringify(release("v1.8.0")), { headers: { ETag: '"e1"' } });
+  it("reads the newest release from GitHub's feed", () => {
+    assert.deepEqual(parseFeed(feed("v1.8.0")), {
+      tag_name: "v1.8.0", name: "BDLMiner V1 1.8.0 & more", published_at: "2026-10-30T13:40:00Z",
+      html_url: "https://github.com/bdlglua/BDLMinerV1/releases/tag/v1.8.0",
     });
+    assert.equal(parseFeed("<feed></feed>"), null);
+  });
+
+  it("/release shows the latest, fetching its notes once", async () => {
+    let notesServed = 0;
+    route("GET", /github\.com\/bdlglua\/BDLMinerV1\/releases\.atom$/, text(feed("v1.8.0")));
+    route("GET", /raw\.githubusercontent\.com\/bdlglua\/BDLMinerV1\/v1\.8\.0\/docs\/releases\/v1\.8\.0\.md$/, () => (notesServed++, new Response(NOTES)));
     route("PATCH", /@original/, null);
     const first = await run(command("release"));
     assert.deepEqual(first.body, { type: 5, data: { flags: 0 } });
-    assert.equal(first.follow.embeds[0].title, "🚀 BDLMiner V1 1.8.0");
+    assert.equal(first.follow.embeds[0].title, "🚀 BDLMiner V1 1.8.0 & more");
+    assert.match(first.follow.embeds[0].description, /^\*\*What's new\*\*/);
     assert.match(first.follow.embeds[0].fields[0].value, /installateur web/);
     calls = [];
     const second = await run(command("release", [], { locale: "en-US" }));
-    assert.equal(served, 1);
+    assert.equal(notesServed, 1);
     assert.match(second.follow.embeds[0].fields[0].value, /web flasher/);
   });
 
-  it("/release finds a given version, or says it does not exist", async () => {
-    route("GET", /releases\/tags\/v1\.7\.2$/, release("v1.7.2"));
+  it("/release falls back on the last release seen when GitHub fails", async () => {
+    await env.BOT_KV.put("release:latest", JSON.stringify({ tag_name: "v1.8.0", name: "BDLMiner V1 1.8.0", body: "x", html_url: "u" }));
+    route("GET", /releases\.atom$/, () => new Response("busy", { status: 429 }));
+    route("PATCH", /@original/, null);
+    assert.equal((await run(command("release"))).follow.embeds[0].footer.text, "v1.8.0");
+  });
+
+  it("/release finds a given version, with or without notes, or says it does not exist", async () => {
+    route("GET", /\/v1\.7\.2\/docs\/releases\/v1\.7\.2\.md$/, text(NOTES));
+    route("GET", /github\.com\/bdlglua\/BDLMinerV1\/releases\/tag\/v1\.0\.9$/, text("<html>"));
     route("PATCH", /@original/, null);
     assert.equal((await run(command("release", [{ name: "version", value: "v1.7.2" }]))).follow.embeds[0].footer.text, "v1.7.2");
+    calls = [];
+    const old = (await run(command("release", [{ name: "version", value: "1.0.9" }]))).follow.embeds[0];
+    assert.equal(old.description, undefined);
+    assert.equal(old.url, "https://github.com/bdlglua/BDLMinerV1/releases/tag/v1.0.9");
     calls = [];
     assert.match((await run(command("release", [{ name: "version", value: "9.9.9" }]))).follow.content, /n'existe pas/);
     assert.equal((await run(command("release", [{ name: "version", value: "latest" }]))).body.data.flags, 64);
@@ -370,8 +391,9 @@ describe("releases", () => {
 
   it("announces each new release once, in the releases channel, to the announcements role", async () => {
     env.DISCORD_GUILD_ID = "1";
-    let latest = release("v1.8.0");
-    route("GET", /releases\/latest$/, () => new Response(JSON.stringify(latest)));
+    let tag = "v1.8.0";
+    route("GET", /releases\.atom$/, () => new Response(feed(tag)));
+    route("GET", /raw\.githubusercontent\.com/, text(NOTES));
     route("GET", /\/guilds\/1\/channels$/, [{ id: "80", type: 0, name: "🔔-releases-github" }, { id: "81", type: 0, name: "💬-discussion" }]);
     route("GET", /\/guilds\/1\/roles$/, [{ id: "7", name: "🔔 Annonces" }]);
     let fail = true;
@@ -379,14 +401,14 @@ describe("releases", () => {
 
     assert.equal(await announce(env), "recorded v1.8.0");  // first run: no old release reposted
     assert.equal(await announce(env), "up to date");
-    latest = release("v1.9.0");
+    tag = "v1.9.0";
     await assert.rejects(announce(env));  // Discord down: tried again next time
     fail = false;
     assert.equal(await announce(env), "posted v1.9.0");
     const post = calls.filter((c) => c.url.endsWith("/channels/80/messages")).at(-1).body;
-    assert.equal(post.content, "<@&7> **BDLMiner V1 1.9.0** est sortie !");
+    assert.equal(post.content, "<@&7> **BDLMiner V1 1.9.0 & more** est sortie !");
     assert.deepEqual(post.allowed_mentions, { roles: ["7"] });
-    assert.equal(post.embeds[0].title, "🚀 BDLMiner V1 1.9.0");
+    assert.equal(post.embeds[0].title, "🚀 BDLMiner V1 1.9.0 & more");
     assert.equal(await announce(env), "up to date");
   });
 });

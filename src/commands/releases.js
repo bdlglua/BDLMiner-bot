@@ -5,7 +5,8 @@ import { option, rest } from "../discord.js";
 import { lang } from "../util.js";
 
 const REPO = "bdlglua/BDLMinerV1";
-const API = `https://api.github.com/repos/${REPO}`;
+const SITE = `https://github.com/${REPO}`;
+const RAW = `https://raw.githubusercontent.com/${REPO}`;
 const INSTALLER = "https://bdlglua.github.io/BDLMinerV1/";
 const ORANGE = 0xf7931a;
 const NOTES_MAX = 3500;
@@ -43,43 +44,72 @@ export function handle(interaction, env) {
 }
 
 // --- GitHub ---
+// Not the REST API: its 60 anonymous requests an hour are counted per address,
+// and the addresses Workers fetch from are shared with everyone else's Workers
+// (it answered 403 at once). The release feed and the repository's raw files
+// have no such limit.
 
-function slim(r) {
-  return { tag_name: r.tag_name, name: r.name, body: r.body ?? "", html_url: r.html_url, published_at: r.published_at };
+async function get(url) {
+  return fetch(url, { headers: { "User-Agent": "bdlminer-bot" }, signal: AbortSignal.timeout(8000) });
 }
 
-async function github(path, etag) {
-  const headers = { Accept: "application/vnd.github+json", "User-Agent": "bdlminer-bot", "X-GitHub-Api-Version": "2022-11-28" };
-  if (etag) headers["If-None-Match"] = etag;
-  return fetch(API + path, { headers, signal: AbortSignal.timeout(8000) });
+function unescape(s) {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 }
 
-// The latest release, kept in KV with its ETag: an unchanged answer (304) does
-// not count against GitHub's limit of 60 anonymous requests an hour, which the
-// Workers' shared addresses could otherwise reach.
+// The newest entry of GitHub's release feed; its link names the tag.
+export function parseFeed(xml) {
+  const entry = xml.match(/<entry>([\s\S]*?)<\/entry>/)?.[1];
+  const link = entry?.match(/<link[^>]*href="([^"]+\/releases\/tag\/([^"]+))"/);
+  if (!link) return null;
+  const title = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1];
+  return {
+    tag_name: decodeURIComponent(link[2]), name: title ? unescape(title.trim()) : "",
+    html_url: link[1], published_at: entry.match(/<updated>([^<]+)<\/updated>/)?.[1] ?? null,
+  };
+}
+
+// Release notes are written in docs/releases/<tag>.md, from which the GitHub
+// release is made; null when there is no such file (the 1.0.x releases).
+async function notesOf(tag) {
+  const res = await get(`${RAW}/${tag}/docs/releases/${tag}.md`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  return res.text();
+}
+
+// The latest release; the last one seen is kept in KV in case GitHub fails.
 export async function latest(env) {
   const cached = await env.BOT_KV.get("release:latest");
-  const res = await github("/releases/latest", cached ? await env.BOT_KV.get("release:etag") : null);
-  if (res.status === 304 && cached) return JSON.parse(cached);
-  if (!res.ok) {
+  try {
+    const res = await get(`${SITE}/releases.atom`);
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const head = parseFeed(await res.text());
+    if (!head) throw new Error("GitHub: no release found");
+    const known = cached ? JSON.parse(cached) : null;
+    if (known?.tag_name === head.tag_name) return known;
+    const release = { ...head, body: (await notesOf(head.tag_name)) ?? "" };
+    await env.BOT_KV.put("release:latest", JSON.stringify(release));
+    return release;
+  } catch (e) {
     if (cached) return JSON.parse(cached);
-    throw new Error(`GitHub ${res.status}`);
+    throw e;
   }
-  const release = slim(await res.json());
-  await env.BOT_KV.put("release:latest", JSON.stringify(release));
-  const etag = res.headers.get("ETag");
-  if (etag) await env.BOT_KV.put("release:etag", etag);
-  return release;
 }
 
 async function tagged(env, tag) {
   const key = `release:tag:${tag}`;
   const cached = await env.BOT_KV.get(key);
   if (cached) return JSON.parse(cached);
-  const res = await github(`/releases/tags/${tag}`);
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub ${res.status}`);
-  const release = slim(await res.json());
+  const html_url = `${SITE}/releases/tag/${tag}`;
+  let body = await notesOf(tag);
+  if (body === null) {
+    const page = await get(html_url);
+    if (page.status === 404) return null;
+    if (!page.ok) throw new Error(`GitHub ${page.status}`);
+    body = "";
+  }
+  const release = { tag_name: tag, name: `BDLMiner V1 ${tag.slice(1)}`, body, html_url, published_at: null };
   await env.BOT_KV.put(key, JSON.stringify(release), { expirationTtl: DAY });
   return release;
 }
@@ -107,7 +137,7 @@ export function embed(release, l = "fr") {
     title: `🚀 ${release.name || `BDLMiner V1 ${release.tag_name}`}`,
     url: release.html_url,
     color: ORANGE,
-    description: notes(release.body, release.tag_name),
+    description: notes(release.body, release.tag_name) || undefined,
     fields: [{
       name: fr ? "Installer" : "Install",
       value: fr
