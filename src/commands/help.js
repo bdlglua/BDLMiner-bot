@@ -5,6 +5,7 @@ import { has } from "../discord.js";
 import { lang } from "../util.js";
 import * as answers from "./answers.js";
 import * as moderation from "./moderation.js";
+import * as releases from "./releases.js";
 import * as stats from "./stats.js";
 import * as tickets from "./tickets.js";
 
@@ -17,7 +18,7 @@ export const definitions = [{
 
 // Order shown; /help itself goes with the quick answers.
 const CATEGORIES = [
-  { fr: "📚 Aide et réponses rapides", en: "📚 Help and quick answers", commands: () => [...answers.definitions, ...definitions] },
+  { fr: "📚 Aide et réponses rapides", en: "📚 Help and quick answers", commands: () => [...answers.definitions, ...releases.definitions, ...definitions] },
   { fr: "₿ Bitcoin et pools", en: "₿ Bitcoin and pools", commands: () => stats.definitions },
   {
     fr: "🎫 Support", en: "🎫 Support", commands: () => tickets.definitions,

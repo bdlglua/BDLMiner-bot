@@ -70,7 +70,7 @@ jobs:
       - name: Deploy the worker
         if: steps.config.outputs.ready == 'true'
         run: |
-          $WRANGLER deploy --var "DISCORD_APPLICATION_ID:$DISCORD_APPLICATION_ID" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY"
+          $WRANGLER deploy --var "DISCORD_APPLICATION_ID:$DISCORD_APPLICATION_ID" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY" --var "DISCORD_GUILD_ID:$DISCORD_GUILD_ID"
           printf '%s' "$DISCORD_TOKEN" | $WRANGLER secret put DISCORD_TOKEN
 
       - name: Register the slash commands

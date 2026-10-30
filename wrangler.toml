@@ -11,3 +11,7 @@ id = "KV_NAMESPACE_ID"
 
 [observability]
 enabled = true
+
+# Checks for a new BDLMiner release to announce.
+[triggers]
+crons = ["*/10 * * * *"]

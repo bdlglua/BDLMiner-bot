@@ -23,6 +23,7 @@ no gateway connection. Every push to `main` is tested and deployed by GitHub Act
 | `/odds` | Everyone | Chance of a block per day and year for a hashrate (`1M`, `350k`, `1.2 TH/s`) |
 | `/help` | Everyone | The commands the member can use, by category |
 | `/install` `/pools` `/faq` | Everyone | Ready answers, optionally mentioning a member |
+| `/release` | Everyone | The latest BDLMiner V1 release notes, or those of a given version |
 
 Moderation replies are only shown to the moderator; every action is logged in the
 moderation channel (the text channel whose name contains *modération*) and the bot
@@ -33,6 +34,12 @@ contains *Modérat*); the member or a moderator closes it, which archives and lo
 `/pool` finds the pool's statistics API the way the miner does: ckpool's
 `/users/<address>` (or `/api/miner?address=`) and public-pool's `/api/client/<address>`,
 on the pool's host and its parent domain.
+
+Every 10 minutes the Worker checks [BDLMinerV1's releases](https://github.com/bdlglua/BDLMinerV1/releases)
+and posts a new one in the releases channel (the channel whose name contains
+*release*), mentioning the announcements role (*Annonces*). The first check after
+installing the bot only records the current release. `RELEASE_CHANNEL_ID` replaces
+the lookup by name.
 
 Music is not possible here: a Worker cannot join voice channels.
 

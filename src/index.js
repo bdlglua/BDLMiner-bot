@@ -6,10 +6,11 @@ import { say } from "./util.js";
 import * as answers from "./commands/answers.js";
 import * as help from "./commands/help.js";
 import * as moderation from "./commands/moderation.js";
+import * as releases from "./commands/releases.js";
 import * as stats from "./commands/stats.js";
 import * as tickets from "./commands/tickets.js";
 
-const MODULES = [help, answers, stats, tickets, moderation];
+const MODULES = [help, answers, releases, stats, tickets, moderation];
 
 export const commands = MODULES.flatMap((m) => m.definitions).map((c) => ({ type: 1, contexts: [0], ...c }));
 
@@ -33,6 +34,11 @@ export default {
       return new Response("Unknown interaction", { status: 400 });
     }
     return respond(interaction, env, ctx, result);
+  },
+
+  // Cron trigger (wrangler.toml): announces new BDLMiner releases.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(releases.announce(env).then((r) => console.log(`releases: ${r}`)));
   },
 };
 
