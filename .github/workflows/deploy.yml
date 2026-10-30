@@ -1,0 +1,78 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+      - run: npm run commands
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: deploy
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      DISCORD_APPLICATION_ID: ${{ vars.DISCORD_APPLICATION_ID }}
+      DISCORD_PUBLIC_KEY: ${{ vars.DISCORD_PUBLIC_KEY }}
+      DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+      WRANGLER: npx --yes wrangler@4.150.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Until the repository is set up (see README), there is nothing to deploy to.
+      - name: Check the configuration
+        id: config
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID DISCORD_TOKEN DISCORD_APPLICATION_ID DISCORD_PUBLIC_KEY DISCORD_GUILD_ID; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Not deployed, missing:$missing (see README)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: KV namespace
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          title=bdlminer-bot-kv
+          find_id() { $WRANGLER kv namespace list | sed -n '/^\[/,$p' | jq -r --arg t "$title" '.[] | select(.title == $t) | .id'; }
+          id=$(find_id)
+          if [ -z "$id" ]; then
+            $WRANGLER kv namespace create "$title"
+            id=$(find_id)
+          fi
+          [ -n "$id" ] || { echo "::error::KV namespace not found"; exit 1; }
+          sed -i "s/KV_NAMESPACE_ID/$id/" wrangler.toml
+
+      - name: Deploy the worker
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          $WRANGLER deploy --var "DISCORD_APPLICATION_ID:$DISCORD_APPLICATION_ID" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY"
+          printf '%s' "$DISCORD_TOKEN" | $WRANGLER secret put DISCORD_TOKEN
+
+      - name: Register the slash commands
+        if: steps.config.outputs.ready == 'true'
+        run: npm run register

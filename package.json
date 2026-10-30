@@ -1,0 +1,16 @@
+{
+  "name": "bdlminer-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord bot of the BDLMiner community: moderation, Bitcoin and pool statistics, quick answers, support tickets",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "register": "node scripts/register.js",
+    "commands": "node scripts/register.js --dry-run"
+  }
+}

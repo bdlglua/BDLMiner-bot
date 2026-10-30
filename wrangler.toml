@@ -1,0 +1,13 @@
+name = "bdlminer-bot"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Warnings, open tickets and cached lookups. The deploy workflow finds (or
+# creates) the namespace titled "bdlminer-bot-kv" and writes its id here.
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "KV_NAMESPACE_ID"
+
+[observability]
+enabled = true
